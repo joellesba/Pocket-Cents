@@ -1,0 +1,21 @@
+{
+  "name": "money-map",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cap:sync": "npx cap sync",
+    "cap:open:android": "npx cap open android",
+    "cap:open:ios": "npx cap open ios",
+    "assets": "npx @capacitor/assets generate"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.0",
+    "@capacitor/cli": "^8.0.1",
+    "@capacitor/android": "^8.0.1",
+    "@capacitor/ios": "^8.0.1"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.0.1"
+  }
+}
