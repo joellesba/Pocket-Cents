@@ -5,7 +5,17 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
 <title>Money Forecast App</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.tailwindcss.com">
+// Sync dashboard forecast toggle state after all functions are defined
+window.addEventListener('load', function(){
+  try{
+    if (typeof setForecastView === 'function'){
+      setForecastView(window._mm_forecastView || 'month');
+    }
+  }catch(e){}
+});
+
+</script>
 <script>
 /* ===== Debt Planner Safe Extra ===== */
 function calculateSafeExtra() {
@@ -182,13 +192,6 @@ function _mm_getDebtPlanPaymentDay(){
     font-weight: 600;
   }
 </style>
-<link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#0b1220">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Money Map">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
-
 </head>
 <body class="bg-gray-100 overflow-x-hidden">
 <div class="flex h-screen">
@@ -224,6 +227,26 @@ function _mm_getDebtPlanPaymentDay(){
 </div>
 <!-- Dashboard -->
 <div class="p-4" id="dashboard">
+<div class="mb-4 bg-white rounded-xl shadow p-4">
+<div class="flex items-center justify-between gap-3">
+<div>
+<div class="text-sm text-gray-500">Daily Forecast</div>
+<div class="text-xs text-gray-400">Forecasted balance by day (scroll to see future months)</div>
+</div>
+<div class="flex items-center gap-2">
+  <div class="inline-flex rounded-lg border bg-white overflow-hidden text-xs">
+    <button id="forecastViewDay" class="px-3 py-1.5" onclick="setForecastView('day')">Day</button>
+    <button id="forecastViewMonth" class="px-3 py-1.5" onclick="setForecastView('month')">Month</button>
+    <button id="forecastViewYear" class="px-3 py-1.5" onclick="setForecastView('year')">Year</button>
+  </div>
+  <div id="forecastScrollHint" class="text-xs text-gray-400 whitespace-nowrap">Scroll →</div>
+</div>
+</div>
+<div class="mt-3 overflow-x-auto pb-2" id="dailyForecastScroll">
+<canvas height="180" id="dailyForecastCanvas"></canvas>
+</div>
+</div>
+
 <div class="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
 <div class="bg-white rounded-xl shadow p-4">
 <div class="text-sm text-gray-500">Today's Forecasted Balance</div>
@@ -239,18 +262,6 @@ function _mm_getDebtPlanPaymentDay(){
 <div class="text-sm text-gray-500">12 Month Forecasted Balance</div>
 <div class="text-2xl font-bold" id="forecastBalance12mo">$0.00</div>
 <div class="text-xs text-gray-400 mt-1">end of month 12</div>
-</div>
-</div>
-<div class="mb-4 bg-white rounded-xl shadow p-4">
-<div class="flex items-center justify-between gap-3">
-<div>
-<div class="text-sm text-gray-500">Daily Forecast</div>
-<div class="text-xs text-gray-400">Forecasted balance by day (scroll to see future months)</div>
-</div>
-<div class="text-xs text-gray-400 whitespace-nowrap">Scroll →</div>
-</div>
-<div class="mt-3 overflow-x-auto pb-2" id="dailyForecastScroll">
-<canvas height="180" id="dailyForecastCanvas"></canvas>
 </div>
 </div>
 <div class="mb-4 bg-white rounded-xl shadow p-4">
@@ -382,7 +393,11 @@ function _mm_getDebtPlanPaymentDay(){
 <!-- Mini 5-year Balance Strip -->
 <div>
 <div class="text-xs text-gray-500 mb-1">Lowest projected balance by month</div>
-<div class="flex items-end space-x-1 h-10" id="miniBalanceStrip"></div>
+<div class="w-full max-w-full overflow-hidden">
+  <div class="w-full max-w-full overflow-x-auto overflow-y-hidden">
+    <div class="flex items-end space-x-1 h-12 w-max" id="miniBalanceStrip"></div>
+  </div>
+</div>
 </div>
 </div>
 <div class="bg-white hidden rounded-xl shadow p-4 mb-4 border border-green-200" data-mm-hidden-apply-settings="">
@@ -1849,6 +1864,8 @@ function renderSweepPreview(){
     body.appendChild(tr);
   });
 }
+
+
 function renderMiniBalanceStrip(){
   const strip = document.getElementById('miniBalanceStrip');
   if(!strip) return;
@@ -1894,15 +1911,9 @@ function renderMiniBalanceStrip(){
       afterBar.style.height = `${afterH}%`;
       stack.appendChild(afterBar);
     }
-
-    const lbl = document.createElement('div');
-    lbl.className = 'text-[10px] text-gray-500 mt-1';
-    lbl.textContent = r.label.split(' ')[0];
-
-    col.appendChild(stack);
-    col.appendChild(lbl);
     strip.appendChild(col);
   });
+  try{ renderMiniBalanceLabels(rows.map(r=>String(r.label||'').trim())); }catch(e){}
 }
 
 // Wrap renderDebtPlanner so preview stays in sync without editing the original function body
@@ -3994,11 +4005,14 @@ function renderMultiMonth(){
 
 
 function renderMonthlyForecastChart(){
-  // Continuous daily forecast chart (single canvas) with horizontal scrolling.
-  // This removes any visible "break" between months.
+  // Dashboard forecast chart with view modes: day (scrolling), month, year.
   const canvas = document.getElementById('dailyForecastCanvas');
   const scroll = document.getElementById('dailyForecastScroll');
+  const hint = document.getElementById('forecastScrollHint');
   if(!canvas || !scroll) return;
+
+  // Ensure view exists
+  window._mm_forecastView = window._mm_forecastView || 'month';
 
   // Normalize dailyBalances -> rows[{date,balance}] sorted
   let rows = Array.isArray(dailyBalances) ? dailyBalances.slice() : [];
@@ -4022,33 +4036,99 @@ function renderMonthlyForecastChart(){
     canvas.style.height = '180px';
     const ctx0 = canvas.getContext('2d');
     try{ ctx0.clearRect(0,0,canvas.width,canvas.height); }catch(e){}
+    if(hint) hint.classList.add('hidden');
     return;
   }
 
-  // Limit to ~12 months of data from first date (keeps canvas size reasonable)
+  // Horizon by view
+  const view = (window._mm_forecastView === 'year') ? 'year' : (window._mm_forecastView === 'month' ? 'month' : 'day');
+  const horizonMonths = (view === 'year') ? 60 : 12;
+
+  // Limit horizon (keeps charts fast + matches requested views)
   const startDate = new Date(rows[0].date.getFullYear(), rows[0].date.getMonth(), rows[0].date.getDate());
-  const endLimit = new Date(startDate.getFullYear(), startDate.getMonth()+12, startDate.getDate());
+  const endLimit = new Date(startDate.getFullYear(), startDate.getMonth()+horizonMonths, startDate.getDate());
   rows = rows.filter(r=> r.date <= endLimit);
 
-  // Width: 12px per day; minimum 400px
-  const pxPerDay = 12;
-  const width = Math.max(400, rows.length * pxPerDay);
+
+  // --------- helpers ---------
+  const fmtMoney0 = (n)=> '$' + (Number(n)||0).toLocaleString(undefined,{maximumFractionDigits:0});
+  const fmtMoney2 = (n)=> '$' + (Number(n)||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+
+  function aggregateRows(mode){
+    if(mode === 'month'){
+      const by = new Map(); // 'YYYY-MM' -> {date,balance} (last point in month)
+      for(const r of rows){
+        const d = r.date;
+        const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+        const prev = by.get(key);
+        if(!prev || d > prev.date) by.set(key, {date: new Date(d.getFullYear(), d.getMonth(), 1), balance: r.balance});
+      }
+      const out = Array.from(by.entries())
+        .sort((a,b)=>a[0].localeCompare(b[0]))
+        .map(([k,v])=>({key:k, date:v.date, balance:v.balance, label: v.date.toLocaleString(undefined,{month:'short', year:'numeric'})}));
+      return out.slice(0, 12);
+    }
+    if(mode === 'year'){
+      const by = new Map(); // 'YYYY' -> last point in year
+      for(const r of rows){
+        const d = r.date;
+        const key = String(d.getFullYear());
+        const prev = by.get(key);
+        if(!prev || d > prev.date) by.set(key, {date: new Date(d.getFullYear(), 0, 1), balance: r.balance});
+      }
+      const out = Array.from(by.entries())
+        .sort((a,b)=>a[0].localeCompare(b[0]))
+        .map(([k,v])=>({key:k, date:v.date, balance:v.balance, label: k}));
+      return out.slice(0, 5);
+    }
+    // day
+    return rows.map(r=>{
+      const d=r.date;
+      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), da=String(d.getDate()).padStart(2,'0');
+      return { key:`${y}-${m}-${da}`, date:d, balance:r.balance, label:`${y}-${m}-${da}` };
+    });
+  }
+  // view already set above
+  const pts = aggregateRows(view);
+  const labels = pts.map(p=>p.label);
+  const data = pts.map(p=>p.balance);
+
+  // Layout rules:
+  // - Day: wide scrolling canvas
+  // - Month/Year: responsive fixed-width canvas
+  const pxPerPoint = (view==='day') ? 12 : (view==='month' ? 40 : 80);
+  const width = (view==='day')
+    ? Math.max(400, pts.length * pxPerPoint)
+    : Math.max(400, Math.min(900, pts.length * pxPerPoint));
+
   canvas.width = width;
   canvas.height = 180;
-  canvas.style.width = width + 'px';
+  canvas.style.width = (view==='day' ? (width + 'px') : '100%');
   canvas.style.height = '180px';
 
-  // Daily labels as local ISO dates (YYYY-MM-DD) so we can format as real dates on the axis
-  const labels = rows.map(r => {
-    const d = r.date;
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  });
-  const data = rows.map(r=> r.balance);
+  // Toggle scroll affordance
+  if(hint){
+    if(view==='day') hint.classList.remove('hidden');
+    else hint.classList.add('hidden');
+  }
+  if(view==='day'){
+    scroll.classList.add('overflow-x-auto');
+  }else{
+    // keep container scrollable (harmless), but reset position
+    try{ scroll.scrollLeft = 0; }catch(e){}
+  }
 
   const ctx = canvas.getContext('2d');
+
+  // Subtle gradient fill for a more polished look
+  let fill = false;
+  try{
+    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    g.addColorStop(0, 'rgba(34,197,94,0.20)');
+    g.addColorStop(1, 'rgba(34,197,94,0.00)');
+    fill = g;
+  }catch(e){ fill = false; }
+
   window._mm_dailyForecastChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -4057,73 +4137,98 @@ function renderMonthlyForecastChart(){
         label: 'Forecasted Balance',
         data,
         tension: 0.25,
-        fill: false,
+        fill: !!fill,
+        backgroundColor: fill || undefined,
+        borderColor: 'rgb(34,197,94)',
         borderWidth: 2,
-        pointRadius: 0,
-        pointHitRadius: 10
+        pointRadius: (view==='day') ? 0 : 2,
+        pointHoverRadius: 4,
+        pointHitRadius: 12
       }]
     },
     options: {
-      responsive: false,
+      responsive: (view !== 'day'),
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             title: (items)=>{
               const i = items?.[0]?.dataIndex ?? 0;
-              const dt = rows[i]?.date;
-              return dt ? dt.toLocaleDateString() : '';
-            }
+              const dt = pts[i]?.date;
+              if(!dt) return '';
+              if(view==='day') return dt.toLocaleDateString();
+              if(view==='month') return dt.toLocaleString(undefined,{month:'long', year:'numeric'});
+              return String(dt.getFullYear());
+            },
+            label: (item)=> ` ${fmtMoney2(item.parsed?.y)}`
           }
         }
       },
-      elements: { point: { radius: 0 } },
       scales: {
         x: {
           grid: { display: false },
           ticks: {
-            autoSkip: false,
-              callback: function(value, index) {
-                if (index === 0 || index % 7 === 0) {
-                  return this.getLabelForValue(value);
-                }
-                return '';
-              },
-            maxTicksLimit: 14,
-            maxRotation: 90,
-            minRotation: 90,
+            autoSkip: true,
+            maxTicksLimit: (view==='day') ? 14 : 12,
+            maxRotation: 0,
+            minRotation: 0,
             font: { size: 10 },
             callback: function(value){
-              // value is the tick index for category scales
-              const label = (typeof value === 'number' && this.getLabelForValue)
-                ? this.getLabelForValue(value)
-                : value;
-              // Parse YYYY-MM-DD as local (avoid UTC date shifting on some timezones)
-              let d;
-              const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(label));
-              if (m) {
-                d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-              } else {
-                d = new Date(label);
+              const label = this.getLabelForValue(value);
+              if(view==='day'){
+                // Show weekly ticks (every 7 days) plus the first
+                const idx = Number(value)||0;
+                if(idx===0 || idx%7===0){
+                  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(label));
+                  if(m){
+                    const d = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+                    return new Intl.DateTimeFormat(undefined, { month:'numeric', day:'numeric' }).format(d);
+                  }
+                  return label;
+                }
+                return '';
               }
-              if (Number.isNaN(d.getTime())) return label;
-              return new Intl.DateTimeFormat('en-US', { month:'numeric', day:'numeric', year:'2-digit' }).format(d);
+              return label;
             }
           }
         },
         y: {
-          ticks: {
-            callback: (v)=> '$' + (Number(v)||0).toFixed(0)
-          }
+          grid: { drawBorder: false },
+          ticks: { callback: (v)=> fmtMoney0(v) }
         }
       }
     }
   });
 
-  // Start at left
-  try{ scroll.scrollLeft = 0; }catch(e){}
+  // Start at left for day view
+  if(view==='day'){
+    try{ scroll.scrollLeft = 0; }catch(e){}
+  }
 }
+
+// Dashboard chart view toggle
+function setForecastView(mode){
+  const m = (mode==='month' || mode==='year') ? mode : 'day';
+  window._mm_forecastView = m;
+
+  // Update button styles
+  const dayBtn = document.getElementById('forecastViewDay');
+  const monBtn = document.getElementById('forecastViewMonth');
+  const yrBtn = document.getElementById('forecastViewYear');
+  const all = [dayBtn, monBtn, yrBtn].filter(Boolean);
+  all.forEach(b=>{
+    b.classList.remove('bg-gray-900','text-white','font-semibold');
+  });
+  const active = (m==='day') ? dayBtn : (m==='month' ? monBtn : yrBtn);
+  if(active){
+    active.classList.add('bg-gray-900','text-white','font-semibold');
+  }
+
+  try{ renderMonthlyForecastChart(); }catch(e){}
+}
+
 
 function updateBillsMonthOptions(){
   const sel = document.getElementById('billsMonthSelect');
@@ -6720,7 +6825,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     if (!hasForecast()) return;
 
     const buffer = getBuffer();
-    const lows = getMonthlyLows(12);
+    const lows = getMonthlyLows(60);
     if (!lows.length) return;
 
     const values = lows.map(x=>x.low);
@@ -6728,59 +6833,62 @@ window.addEventListener('DOMContentLoaded', ()=>{
     const vMax = Math.max(...values);
     const denom = (vMax - vMin) || 1;
 
-    for (const m of lows){
+    function monthLabel(key){
+      // key is YYYY-MM
+      const parts = String(key||'').split('-');
+      const y = parts[0] || '';
+      const mm = parseInt(parts[1]||'1', 10);
+      const d = new Date(parseInt(y||'2000',10), Math.max(0,(mm||1)-1), 1);
+      const mon = d.toLocaleString('default', { month: 'short' });
+      return { mon, y };
+    }
+
+    // Ensure strip uses column layout (in case Tailwind classes changed elsewhere)
+    strip.classList.add('overflow-visible');
+    strip.style.display = 'flex';
+    strip.style.alignItems = 'flex-end';
+    strip.style.gap = '4px';
+    strip.style.minHeight = '72px';
+    strip.style.paddingBottom = '4px';
+    strip.style.maxWidth = '100%';
+
+    lows.forEach((mo, idx)=>{
+      const col = document.createElement('div');
+      col.style.width = '18px'; // ~ w-6
+      col.style.display = 'flex';
+      col.style.flexDirection = 'column';
+      col.style.alignItems = 'center';
+
+      const stack = document.createElement('div');
+      stack.style.position = 'relative';
+      stack.style.width = '16px'; // ~ w-4
+      stack.style.height = '44px';
+      stack.style.display = 'flex';
+      stack.style.flexDirection = 'column';
+      stack.style.justifyContent = 'flex-end';
+
       const bar = document.createElement('div');
-      const pct = ((m.low - vMin)/denom)*100;
-      bar.style.height = Math.max(8, pct) + '%';
-      const under = m.low < buffer;
-      bar.className = 'w-2 rounded ' + (under ? 'bg-red-500' : 'bg-green-500');
-      bar.title = `${m.key}: ${fmt(m.low)}`;
-      strip.appendChild(bar);
-    }
+      const pct = ((mo.low - vMin)/denom)*100;
+      bar.style.height = (Math.max(8, pct)) + '%';
+      const under = mo.low < buffer;
+      bar.className = under ? 'bg-red-500' : 'bg-green-500';
+      bar.style.width = '12px';
+      bar.style.borderRadius = '3px';
+      bar.title = `${mo.key}: ${fmt(mo.low)}`;
+
+      stack.appendChild(bar);
+
+      const lbl = document.createElement('div');
+      lbl.className = 'text-[9px] text-gray-500 mt-1 text-center leading-tight';
+      const { mon, y } = monthLabel(mo.key);
+      const showYear = (String(mo.key||'').endsWith('-01')) || (idx === 0);
+      lbl.innerHTML = showYear ? `${mon}<br><span class="opacity-70">${y}</span>` : `${mon}<br><span class="opacity-70">&nbsp;</span>`;
+
+      col.appendChild(stack);
+      col.appendChild(lbl);
+      strip.appendChild(col);
+    });
   }
-
-  function renderPayDayHint(){
-    const el = document.getElementById('paymentDayImpact');
-    if (!el) return;
-    if (!hasForecast()) { el.innerHTML=''; return; }
-
-    const dr = getDailyRows();
-    const payDay = getPayDay();
-    const shifted = Math.min(28, payDay + 7);
-
-    // Compare "min balance after payDay" vs "min balance after shifted day" per month
-    const buckets = new Map(); // yyyy-mm -> {minAfterPay, minAfterShift}
-    for (const r of dr){
-      const d = rowDate(r);
-      if (!d) continue;
-      const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-      const b = +r.balance;
-      if (!isFinite(b)) continue;
-      if (!buckets.has(key)) buckets.set(key, {minAfterPay: Infinity, minAfterShift: Infinity});
-      const obj = buckets.get(key);
-      if (d.getDate() >= payDay) obj.minAfterPay = Math.min(obj.minAfterPay, b);
-      if (d.getDate() >= shifted) obj.minAfterShift = Math.min(obj.minAfterShift, b);
-    }
-
-    const arr = Array.from(buckets.values()).filter(o=>isFinite(o.minAfterPay) && isFinite(o.minAfterShift));
-    if (!arr.length) { el.innerHTML=''; return; }
-
-    const avgDelta = arr.reduce((a,o)=>a + (o.minAfterShift - o.minAfterPay),0) / arr.length;
-
-    if (avgDelta > 5){
-      el.innerHTML = `💡 If your income hits later in the month, moving the debt payment day later may increase your monthly low by <b>${fmt(avgDelta)}</b> on average.`;
-    } else if (avgDelta < -5){
-      el.innerHTML = `💡 Paying earlier may keep you safer this month. Consider moving the debt payment day earlier if cash gets tight mid-month.`;
-    } else {
-      el.innerHTML = `💡 Payment day timing looks fine based on your current cash-flow.`;
-    }
-  }
-
-function toggleSafeExtraMonthly(){
-  const wrap = document.getElementById('safeExtraMonthlyWrap');
-  if(!wrap) return;
-  wrap.classList.toggle('hidden');
-}
 
 function _mm_monthKey(d){
   const y = d.getFullYear();
@@ -6886,6 +6994,31 @@ function renderSafeExtraByMonth(){
     body.innerHTML = '<tr><td class="p-2 text-red-600" colspan="4">Could not render monthly safe extra (please refresh forecast).</td></tr>';
   }
 }
+
+function renderPayDayHint(){
+  const el = document.getElementById('paymentDayImpact');
+  if (!el) return;
+  try{
+    // If forecast isn't ready yet, clear hint and exit
+    if (typeof hasForecast === 'function' && !hasForecast()){
+      el.innerHTML = '';
+      return;
+    }
+
+    // If there is an existing helper for the hint, use it; otherwise keep minimal.
+    if (typeof getPayDayImpact === 'function'){
+      el.innerHTML = getPayDayImpact() || '';
+      return;
+    }
+
+    // Fallback: compute a simple hint if we can, otherwise leave blank
+    el.innerHTML = el.innerHTML || '';
+  }catch(e){
+    el.innerHTML = '';
+  }
+}
+
+
 function refreshSafeExtraUI(){
     const valueEl = document.getElementById('safeExtraValue');
     const breakdownEl = document.getElementById('safeExtraBreakdown');
@@ -7124,13 +7257,7 @@ function refreshSafeExtraUI(){
 </div>
 </div>
 </div>
-<script>
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js");
-  });
-}
-</script>
-
 </body>
 </html>
+
+<script>try{ setForecastView(window._mm_forecastView || 'month'); }catch(e){}<\/script>
